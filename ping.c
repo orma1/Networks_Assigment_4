@@ -9,30 +9,53 @@
 #include <arpa/inet.h>
 #include <string.h>
 #define TIMOUT 10
-
+int parseArguments(int argc, char *argv[], struct in_addr *ip, int* aFlagExists, int* count, int* flood);
 int main(int argc, char *argv[]){
     struct in_addr ip;
     int aFlagExists = 0; //we have to make sure -a exists as it is mandatory.
     int count = 0;
-    int back_to_back = 0;
-   for(int i = 0; i < argc; i++){
+    int flood = 0;
+    if(parseArguments(argc,argv, &ip, &aFlagExists, &count, &flood) < 0) return EXIT_FAILURE;
+     printf("ip is %s\n", inet_ntoa(ip));
+     if(count) printf("count: %d\n",count);
+     if(flood) printf("flood: %d\n", flood);
+}
+int parseArguments(int argc, char *argv[], struct in_addr *ip, int* aFlagExists, int* count, int* flood){
+ for(int i = 0; i < argc; i++){
         if(strcmp(argv[i], "-a") == 0 && i+1 < argc){//we check both if we have -a and another field after for the ip address.
-            aFlagExists = 1;//if so we found the aFlag.
-            if (inet_pton(AF_INET, argv[i+1], &ip) == 1) printf("ip is %s\n", inet_ntoa(ip));//check if the IP is valid an if so print it
+            *aFlagExists = 1;//if so we found the aFlag.
+            if (inet_pton(AF_INET, argv[i+1], ip) == 1);//check if the IP is valid
             else { //if not valid we quit
                 printf("invalid ip format\n");
-                return EXIT_FAILURE;
+                return -1;
             }
         }
         if(strcmp(argv[i], "-c") == 0 && i+1 < argc){
-            count = argv[i+1];
+            *count = atoi(argv[i+1]);
+            if (*count <= 0 ||  *count > 255){
+                printf("Error: count must be between 0 and 255\n");
+                return -1;
+            }
+            if (*count == 0){
+                printf("Error: -c must be an integer.\n");
+                return -1;
+            }
         }
         if(strcmp(argv[i], "-f") == 0 && i+1 < argc){
-            back_to_back = argv[i+1];
+            *flood = atoi(argv[i+1]);
+            if (*flood <= 0 ||  *flood > 255){
+                printf("Error: flood must be between 0 and 255\n");
+            }
+            if (*flood == 0){
+                printf("Error: -f must be an integer.\n");
+                return -1;
+            }
         }
     }
-   if(!aFlagExists){
-    printf("-a flag is mandatory");
-    return EXIT_FAILURE;
-   }
+           if(!*aFlagExists){
+                printf("-a flag is mandatory");
+                return -1;
+            }
+        return 0;
 }
+
