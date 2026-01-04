@@ -10,20 +10,41 @@
 #include <errno.h>
 #include <signal.h>
 #include <pthread.h>
+#include <math.h>
 #include "ping.h"
-#define TIMEOUT 10
-#define PKT_SIZE 64
+
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER; // Mutex for thread safety
+
 int numPacketsRecieved = 0;
 int numPacketsSent = 0;
 int sockStatus = -1;
+int floodMode = 0;
+struct sockaddr_in dest;
+RingBuffer ring_buffer;
+
+// For stats
+double min_rtt = 9999.0;
+double max_rtt = 0.0;
+double sum_rtt = 0.0;
+double sum_sq_rtt = 0.0; // Sum of squares for mdev
+
 
 int main(int argc, char *argv[]){
-    unsigned int dest_ip;
     int aFlagExists = 0; //we have to make sure -a exists as it is mandatory.
     int count = 0;
     int flood = 0;
+    unsigned int dest_ip;
+
+    struct timeval *b = (struct timeval *)calloc(1024, sizeof(struct timeval));
+    if (!b){
+        printf("failed to set buffer ring dynamic memory");
+        return EXIT_FAILURE;
+    }
+
+    ring_buffer.buffer = b;
+    ring_buffer.size = 1024;
+      
 
     //if parseArguments did not succeed we exit the program
     if(parseArguments(argc,argv, &dest_ip, &aFlagExists, &count, &flood) < 0) return EXIT_FAILURE;
@@ -41,7 +62,6 @@ int main(int argc, char *argv[]){
         return 1;
     }
     
-    struct sockaddr_in dest;
     memset(&dest, 0, sizeof(dest));
     dest.sin_family = AF_INET;
     dest.sin_addr.s_addr = dest_ip;
@@ -51,9 +71,34 @@ int main(int argc, char *argv[]){
            inet_ntoa(*(struct in_addr *)&dest_ip), 
            PKT_SIZE - sizeof(struct icmphdr));
     
-    return ping_loop(count, sockStatus, &dest);
 
-     
+    SenderArgs sender_args = {
+        .dest = &dest,
+        .ring_buffer = &ring_buffer,
+        .sock = sockStatus,
+        .count = count
+    };
+
+    ReceiverArgs receiver_args = {
+        .ring_buffer = &ring_buffer,
+        .sock = sockStatus,
+        .count = count
+    };
+
+    pthread_t senderT, receiverT;
+
+    // Create the threads
+    pthread_create(&senderT, NULL, sender_thread, &sender_args);
+    pthread_create(&receiverT, NULL, receiver_thread, &receiver_args);
+
+    // Wait for them to finish
+    pthread_join(senderT, NULL);
+    pthread_join(receiverT, NULL);
+
+    // We are done
+    cleanup(0);
+
+    return EXIT_SUCCESS;
 }
 
 int parseArguments(int argc, char *argv[], unsigned int *ip, int* aFlagExists, int* count, int* flood){
@@ -80,12 +125,15 @@ int parseArguments(int argc, char *argv[], unsigned int *ip, int* aFlagExists, i
         }
         if(strcmp(argv[i], "-f") == 0 && i+1 < argc){
             *flood = atoi(argv[i+1]);
-            if (*flood <= 0 ||  *flood > 255){
-                printf("Error: flood must be between 0 and 255\n");
+            if (*flood <= 0){
+                printf("Error: flood must be positive\n");
             }
             if (*flood == 0){
                 printf("Error: -f must be an integer.\n");
                 return -1;
+            }
+            if (*flood > 0){
+                floodMode = 1;
             }
         }
     }
@@ -144,7 +192,7 @@ void prep_packet(char *sendBuffer, int seqNum) {
     icmp_pkt->icmp_type = ICMP_ECHO;//we set header type to echo = 8 
     icmp_pkt->icmp_code = 0;//we set code to 0
     icmp_pkt->icmp_id = getpid() & 0xFFFF;//process ID number shortened to 16-bits
-    icmp_pkt->icmp_seq = seqNum;//we set the packet seqNum number to the one from the input
+    icmp_pkt->icmp_seq = htons(seqNum);//we set the packet seqNum number to the one from the input
 
     // Use a constant for the header size (8 bytes) to avoid struct confusion
     int header_len = 8; 
@@ -181,42 +229,81 @@ int receive_packet(int sockStatus, char *recvbuf, size_t bufsize, struct sockadd
 
 // Thread Function
 void process_reply(char *recvbuf, int bytes, struct sockaddr_in *from, 
-                   /*TODO-check needed fields*/ struct timeval *tv_start, struct timeval *tv_end) {
+                   /*TODO-check needed fields*/struct timeval *tv_end, RingBuffer *ring_buffer) {
+
     struct ip *ip_hdr = (struct ip *)recvbuf;//IPV4 address of replier.
     int hlen = ip_hdr->ip_hl << 2;//20 bytes of IPV4 - TODO change it to hardcoded
-    //initialize pointer to start of ICMP packet data relative to recvbuf.
+
+    
+    // pointer to the start of ICMP packet data relative to recvbuf.
     struct icmp *icmp_reply = (struct icmp *)(recvbuf + hlen);
+
+    
+
     //if we got icmp_type 0 and we are the right process
     if (icmp_reply->icmp_type == ICMP_ECHOREPLY && 
         icmp_reply->icmp_id == (getpid() & 0xFFFF)) {
+
+        int seqNum = ntohs(icmp_reply->icmp_seq);
+        struct timeval *tv_start = address_in_ringbuffer(ring_buffer, seqNum);
+
+
         numPacketsRecieved++;//for statistics.
         //we calculate RTT using start time and end time (from packets we got) 
         double rtt = (tv_end->tv_sec - tv_start->tv_sec) * 1000.0 +
                    (tv_end->tv_usec - tv_start->tv_usec) / 1000.0;
+
+        // Update max
+        if (max_rtt < rtt){
+            max_rtt = rtt;
+        }
+        // update min
+        if (min_rtt > rtt){
+            min_rtt = rtt;
+        }
+        // update sum
+        sum_rtt += rtt;
+        // Sum of squares for mdev
+        sum_sq_rtt += (rtt * rtt);
+
         //we print statistics about the reply packet
         printf("%d bytes from %s: icmp_seq=%d ttl=%d time=%.3f ms\n",
                bytes - hlen,//number of bytes without the header length
                inet_ntoa(from->sin_addr), //IP address of replier
-               icmp_reply->icmp_seq, //seq_Num from the packet
+               seqNum, //seq_Num from the packet
                ip_hdr->ip_ttl, //TTL from the packet
-               rtt); //RTT we calculated
+               rtt
+            ); //RTT we calculated
+
     }
 }
-void cleanup(int sig, struct in_addr dest_addr, int sockStatus) {
-    printf("\n--- %s ping statistics ---\n", inet_ntoa(*(struct in_addr *)&dest_addr));
+
+void cleanup(int sig) {
+    printf("\n--- %s ping statistics ---\n", inet_ntoa(dest.sin_addr));
     
     float loss = 0.0;
     if (numPacketsSent > 0)
         loss = 100.0 * (numPacketsSent - numPacketsRecieved) / numPacketsSent;
     
-    printf("%d packets transmitted, %d received, %.1f%% packet loss\n",
-           numPacketsSent, numPacketsRecieved, loss);
+    printf("%d packets transmitted, %d received, %.1f%% packet loss\nrtt min/avg/max/mdev = %.2f/%.2f/%.2f/%.2f \n",
+           numPacketsSent, 
+           numPacketsRecieved, 
+           loss,
+            min_rtt,
+            sum_rtt/numPacketsRecieved,
+            max_rtt,
+            sqrt((sum_sq_rtt/numPacketsRecieved) - (sum_rtt/numPacketsRecieved)*(sum_rtt/numPacketsRecieved))
+        );
 
     if (sockStatus >= 0) 
         close(sockStatus);
+
+    free(ring_buffer.buffer);
+
     pthread_mutex_destroy(&lock);
     exit(0);
 }
+
 int ping_loop(int count, int sock, struct sockaddr_in *dest) {
     char sendbuf[PKT_SIZE];
     char recvbuf[PKT_SIZE + sizeof(struct ip)];
@@ -284,14 +371,15 @@ unsigned short int calculate_checksum(void *data, unsigned int bytes) {
     return (~((unsigned short int)total_sum));
 }
 
-typedef struct sender_args{
-    char sendbuf[PKT_SIZE];
-    struct sockaddr_in *dest;
-    struct timeval tv_start;
-    int sock;
-    int seqNum;
-    int count;
-} SenderArgs;
+int ring_buffer_push(RingBuffer *buff, int seqNum ,struct timeval data) {
+    buff->buffer[seqNum % buff->size] = data;
+    return 0;
+}
+
+void* address_in_ringbuffer(RingBuffer *buff, int seqNum) {
+    return &buff->buffer[seqNum % buff->size];
+}
+
 
 void *sender_thread(void *arg) {
     // Cast the argument to the correct type
@@ -300,17 +388,44 @@ void *sender_thread(void *arg) {
     while(args->count == 0 || numPacketsSent < args->count) {
 
         pthread_mutex_lock(&lock);
-        prep_packet(args->sendbuf, numPacketsSent++);
-        pthread_mutex_unlock(&lock);
 
-        gettimeofday(&args->tv_start, NULL);
+        prep_packet(args->sendbuf, numPacketsSent);
+        gettimeofday(address_in_ringbuffer(args->ring_buffer ,numPacketsSent), NULL);
+        numPacketsSent++;
+        
+        pthread_mutex_unlock(&lock);
 
         bytes = send_packet(args->sock, args->sendbuf, args->dest);
         if (bytes < 0) {
             continue;
         }
-        sleep(1);
+        if (!floodMode){
+            sleep(1);
+        }
     }
     // Implementation of sender thread
+    return NULL;
+}
+
+
+void *receiver_thread(void *arg) {
+    struct receiver_args *args = (struct receiver_args *)arg;
+
+    while (args->count == 0 || numPacketsRecieved < args->count){
+        int bytes = receive_packet(args->sock, args->recvbuf, sizeof(args->recvbuf), &args->from);
+
+        gettimeofday(&args->tv_end, NULL);
+
+        if (bytes < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) { // Same error nowdays, but in legacy Linux had diffrent value
+                printf("Request timeout for icmp_seq=%d\n", numPacketsSent - 1); 
+            } else {
+                perror("recvfrom error");
+            }
+        } else {
+            process_reply(args->recvbuf, bytes, &args->from, &args->tv_end, args->ring_buffer);
+        }
+    }
+
     return NULL;
 }
