@@ -211,7 +211,7 @@ int ping_loop(int count, int sock, struct sockaddr_in *dest) {
     struct timeval tv_start, tv_end;
     int bytes;
     
-    while (count - numPacketsSent) {
+    while (count == 0 || numPacketsSent < count) {
         prep_packet(sendbuf, numPacketsSent++);
         
         gettimeofday(&tv_start, NULL);
