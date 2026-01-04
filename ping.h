@@ -11,3 +11,6 @@ void process_reply(char *recvbuf, int bytes, struct sockaddr_in *from, struct ti
 void cleanup(int sig, struct in_addr dest_addr, int sockStatus);
 int ping_loop(int count, int sock, struct sockaddr_in *dest);
 unsigned short int calculate_checksum(void *data, unsigned int bytes);
+void initialize_mutex();
+void *sender_thread(void *arg);
+void *reciever_thread(void *arg);

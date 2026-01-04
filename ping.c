@@ -14,12 +14,13 @@
 #define TIMEOUT 10
 #define PKT_SIZE 64
 
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER; // Mutex for thread safety
 int numPacketsRecieved = 0;
 int numPacketsSent = 0;
 int sockStatus = -1;
+
 int main(int argc, char *argv[]){
     unsigned int dest_ip;
-
     int aFlagExists = 0; //we have to make sure -a exists as it is mandatory.
     int count = 0;
     int flood = 0;
@@ -94,6 +95,7 @@ int parseArguments(int argc, char *argv[], unsigned int *ip, int* aFlagExists, i
             }
         return 0;
 }
+
 int initSocket(){
     //creeate IPV4 Raw socket, ICMP protocol
     int s = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
@@ -120,6 +122,7 @@ int initSocket(){
     //if all was ok we return the socket.
     return s;  
 }
+
 void * initDestStruct(struct in_addr * dest_addr){
     struct sockaddr_in dest; //create sockaddr
     memset(&dest, 0, sizeof(dest));
@@ -127,11 +130,14 @@ void * initDestStruct(struct in_addr * dest_addr){
     dest.sin_addr.s_addr = dest_addr;//set IP address to the one we got from argv.
     return &dest;
 }
+
 void start_ping_message(struct in_addr * dest_addr){
    printf("PING  (%s): %ld data bytes\n", 
            inet_ntoa((struct in_addr)*dest_addr), 
            PKT_SIZE - sizeof(struct icmphdr)); 
 }
+
+// Thread Function
 void prep_packet(char *sendBuffer, int seqNum) {
     memset(sendBuffer, 0, PKT_SIZE);
     struct icmp *icmp_pkt = (struct icmp *)sendBuffer;
@@ -149,6 +155,8 @@ void prep_packet(char *sendBuffer, int seqNum) {
     icmp_pkt->icmp_cksum = 0;// to make sure trash values do not intervene with the checksum
     icmp_pkt->icmp_cksum = calculate_checksum((unsigned short *)icmp_pkt, PKT_SIZE);//TODO - switch function
 }
+
+
 int send_packet(int sockStatus, char *sendbuf, struct sockaddr_in *dest) {
     //send our packet through the socket
     int bytes = sendto(sockStatus, sendbuf, PKT_SIZE, 0, 
@@ -160,6 +168,8 @@ int send_packet(int sockStatus, char *sendbuf, struct sockaddr_in *dest) {
     //we return the size
     return bytes;
 }
+
+// Thread Function
 int receive_packet(int sockStatus, char *recvbuf, size_t bufsize, struct sockaddr_in *from) {
     socklen_t fromlen = sizeof(*from);
     //we recieve the reply from our socket
@@ -168,6 +178,8 @@ int receive_packet(int sockStatus, char *recvbuf, size_t bufsize, struct sockadd
     //we return the size
     return bytes;
 }
+
+// Thread Function
 void process_reply(char *recvbuf, int bytes, struct sockaddr_in *from, 
                    /*TODO-check needed fields*/ struct timeval *tv_start, struct timeval *tv_end) {
     struct ip *ip_hdr = (struct ip *)recvbuf;//IPV4 address of replier.
@@ -199,9 +211,10 @@ void cleanup(int sig, struct in_addr dest_addr, int sockStatus) {
     
     printf("%d packets transmitted, %d received, %.1f%% packet loss\n",
            numPacketsSent, numPacketsRecieved, loss);
-    
+
     if (sockStatus >= 0) 
         close(sockStatus);
+    pthread_mutex_destroy(&lock);
     exit(0);
 }
 int ping_loop(int count, int sock, struct sockaddr_in *dest) {
@@ -253,24 +266,51 @@ int ping_loop(int count, int sock, struct sockaddr_in *dest) {
 * You can also use this function as such without any change.
 */
 unsigned short int calculate_checksum(void *data, unsigned int bytes) {
-unsigned short int *data_pointer = (unsigned short int *)data;
-unsigned int total_sum = 0;
-// Main summing loop
-while (bytes > 1) {
-total_sum += *data_pointer++;
-bytes -= 2;
+    unsigned short int *data_pointer = (unsigned short int *)data;
+    unsigned int total_sum = 0;
+
+    // Main summing loop
+    while (bytes > 1) {
+        total_sum += *data_pointer++;
+        bytes -= 2;
+    }
+
+    // Add left-over byte, if any
+    if (bytes > 0) total_sum += *((unsigned char *)data_pointer);
+
+    // Fold 32-bit sum to 16 bits
+    while (total_sum >> 16) total_sum = (total_sum & 0xFFFF) + (total_sum >> 16);
+
+    return (~((unsigned short int)total_sum));
 }
-// Add left-over byte, if any
-if (bytes > 0)
-total_sum += *((unsigned char *)data_pointer);
-// Fold 32-bit sum to 16 bits
-while (total_sum >> 16)
-total_sum = (total_sum & 0xFFFF) + (total_sum >> 16);
-return (~((unsigned short int)total_sum));
+
+typedef struct sender_args{
+    char sendbuf[PKT_SIZE];
+    struct sockaddr_in *dest;
+    struct timeval tv_start;
+    int sock;
+    int seqNum;
+    int count;
+} SenderArgs;
+
+void *sender_thread(void *arg) {
+    // Cast the argument to the correct type
+    struct sender_args *args = (struct sender_args *)arg;
+    int bytes;
+    while(args->count == 0 || numPacketsSent < args->count) {
+
+        pthread_mutex_lock(&lock);
+        prep_packet(args->sendbuf, numPacketsSent++);
+        pthread_mutex_unlock(&lock);
+
+        gettimeofday(&args->tv_start, NULL);
+
+        bytes = send_packet(args->sock, args->sendbuf, args->dest);
+        if (bytes < 0) {
+            continue;
+        }
+        sleep(1);
+    }
+    // Implementation of sender thread
+    return NULL;
 }
-
-
-
-
-
-
