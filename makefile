@@ -9,7 +9,7 @@ CFILES=ping.c
 OBJECTS=ping.o
 
 BINARY=myping
-
+.PHONY: all clean traceroute
 all: $(BINARY)
 
 $(BINARY): $(OBJECTS)
@@ -17,6 +17,10 @@ $(BINARY): $(OBJECTS)
 
 %.o:%.c 
 	$(CC) $(CFLAGS) -c -o $@ $^ $(LDLIBS)
+
+traceroute: mytrace
+mytrace: traceroute.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 clean:
 	rm -rf $(BINARY) $(OBJECTS)
