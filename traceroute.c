@@ -34,7 +34,7 @@ int main(int argc, char *argv[]){
     dest.sin_family = AF_INET;
     dest.sin_addr.s_addr = dest_ip;
     printf("traceroute to %s, %d hops max\n", inet_ntoa(*(struct in_addr *)&dest_ip), MAX_HOPS);
-    return ICMP_loop(sockStatus, &dest);
+    ICMP_loop(sockStatus, &dest);
     cleanup();
     return EXIT_SUCCESS;
 
@@ -89,7 +89,7 @@ void prep_packet(char *sendBuffer, int seqNum) {
     icmp_pkt->icmp_code = 0;//we set code to 0
     icmp_pkt->icmp_id = getpid() & 0xFFFF;//process ID number shortened to 16-bits
     icmp_pkt->icmp_seq = htons(seqNum);//we set the packet seqNum number to the one from the input
-    //TODO = put tv_start inside payload for rtt calculation
+
     // Use a constant for the header size (8 bytes) to avoid struct confusion
     int header_len = 8; 
     
@@ -120,7 +120,7 @@ int receive_packet(int sockStatus, char *recvbuf, size_t bufsize, struct sockadd
 }
 void process_reply(char *recvbuf, struct sockaddr_in *from, 
                    struct timeval *tv_start, struct timeval *tv_end, 
-                   struct sockaddr_in *dest, int *dest_reached, int *ipPrinted) {
+                   struct sockaddr_in *dest, int *dest_reached, struct in_addr *last_addr) {
 
 
     
@@ -132,12 +132,11 @@ void process_reply(char *recvbuf, struct sockaddr_in *from,
     double rtt = (tv_end->tv_sec - tv_start->tv_sec) * 1000.0 +
                  (tv_end->tv_usec - tv_start->tv_usec) / 1000.0;
     
-    // Print the IP and RTT
-    if(!*ipPrinted){
+    // if ip changed - we print it. note for the first packet in the batch, it will print always
+    if(from->sin_addr.s_addr != last_addr->s_addr){
         //we force ip to be aligned with 16 chars, because it can be longer or shorter then 16 chars.
-        //TODO - check if IP hop IP changes between packets with same TTL
         printf("%-16s", inet_ntoa(from->sin_addr));
-        *ipPrinted = 1;
+        *last_addr = from->sin_addr;//we update the IP because it has changed.
     }
     printf("%.3f ms\t", rtt);
     struct icmp *icmp = (struct icmp *)(recvbuf + ip_header_len);
@@ -166,7 +165,8 @@ int ICMP_loop(int sock, struct sockaddr_in *dest) {
             perror("setsockopt IP_TTL");
             return -1;
         }
-        int ipPrinted = 0;
+        struct in_addr last_addr;
+        memset(&last_addr, 0, sizeof(last_addr));
         printf("%d\t", ttl);
         fflush(stdout);
         for (int i = 0; i < PACKET_NUMBER; i++){
@@ -182,7 +182,7 @@ int ICMP_loop(int sock, struct sockaddr_in *dest) {
         //if we got no reply we print *
         if(bytes < 0) printf(" *");
         else{
-            process_reply(recvbuf, &from, &tv_start, &tv_end, dest, &destanationReached, &ipPrinted);
+            process_reply(recvbuf, &from, &tv_start, &tv_end, dest, &destanationReached, &last_addr);
         }
         fflush(stdout); // for printing to appear smooth
         }

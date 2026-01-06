@@ -38,7 +38,7 @@ int send_packet(int sockStatus, char *sendbuf, struct sockaddr_in *dest);
 int receive_packet(int sockStatus, char *recvbuf, size_t bufsize, struct sockaddr_in *from);
 void process_reply(char *recvbuf, struct sockaddr_in *from, 
                    struct timeval *tv_start, struct timeval *tv_end, 
-                   struct sockaddr_in *dest, int *dest_reached, int *ipPrinted);
+                   struct sockaddr_in *dest, int *dest_reached, struct in_addr *last_addr);
 int ICMP_loop(int sock, struct sockaddr_in *dest);
 void cleanup();
 unsigned short int calculate_checksum(void *data, unsigned int bytes);
