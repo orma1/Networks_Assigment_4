@@ -89,7 +89,7 @@ void prep_packet(char *sendBuffer, int seqNum) {
     icmp_pkt->icmp_code = 0;//we set code to 0
     icmp_pkt->icmp_id = getpid() & 0xFFFF;//process ID number shortened to 16-bits
     icmp_pkt->icmp_seq = htons(seqNum);//we set the packet seqNum number to the one from the input
-
+    //TODO = put tv_start inside payload for rtt calculation
     // Use a constant for the header size (8 bytes) to avoid struct confusion
     int header_len = 8; 
     
