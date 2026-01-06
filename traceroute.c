@@ -135,6 +135,7 @@ void process_reply(char *recvbuf, struct sockaddr_in *from,
     // Print the IP and RTT
     if(!*ipPrinted){
         //we force ip to be aligned with 16 chars, because it can be longer or shorter then 16 chars.
+        //TODO - check if IP hop IP changes between packets with same TTL
         printf("%-16s", inet_ntoa(from->sin_addr));
         *ipPrinted = 1;
     }
