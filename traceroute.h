@@ -1,8 +1,9 @@
-#include <stdlib.h>
 #define PKT_SIZE 64
 #define TIMEOUT 1
 #define PACKET_NUMBER 3
 #define PKT_SIZE 64
+#define MAX_TTL 64
+#define MAX_HOPS 30
 struct ip_hdr{
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
     __uint8_t ihl:4;      // Lower 4 bits

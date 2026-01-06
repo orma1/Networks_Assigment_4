@@ -5,16 +5,8 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
-#include <errno.h>
 #include <netinet/ip_icmp.h>
-#include <math.h>
 #include "traceroute.h"
-#define MAX_TTL 64
-#define MAX_HOPS 30
-#define IP_RF 0x8000      // Reserved fragment flag
-#define IP_DF 0x4000      // Dont fragment flag
-#define IP_MF 0x2000      // More fragments flag
-#define FRAGMENT_OFFSET 0x1fff // Mask for fragment offset
 
 int sockStatus = -1;
 int numPacketsRecieved = 0;
@@ -127,7 +119,8 @@ void process_reply(char *recvbuf, struct sockaddr_in *from,
 
     // Parse Headers to check if we hit destination
     struct ip_hdr *ip = (struct ip_hdr *)recvbuf;
-    int ip_header_len = ip->ihl * 4; 
+    int ip_header_len = ip->ihl * 4;
+    struct icmp *icmp = (struct icmp *)(recvbuf + ip_header_len);
         // Calculate RTT
     double rtt = (tv_end->tv_sec - tv_start->tv_sec) * 1000.0 +
                  (tv_end->tv_usec - tv_start->tv_usec) / 1000.0;
@@ -139,7 +132,7 @@ void process_reply(char *recvbuf, struct sockaddr_in *from,
         *last_addr = from->sin_addr;//we update the IP because it has changed.
     }
     printf("%.3f ms\t", rtt);
-    struct icmp *icmp = (struct icmp *)(recvbuf + ip_header_len);
+
 
     // Check if we reached the target
     // We check if it is an ECHO REPLY (Type 0) and comes from the destination IP
