@@ -9,24 +9,24 @@
 #include "traceroute.h"
 
 int sockStatus = -1;
-int numPacketsRecieved = 0;
-int numPacketsSent = 0;
 struct sockaddr_in dest;
 int destanationReached = 0;
 
 int main(int argc, char *argv[]){
     unsigned int dest_ip;
+    //if arguments are not ok we finish the program
     if(parseArguments(argc,argv, &dest_ip) < 0) return EXIT_FAILURE;
     sockStatus = initSocket();
-    if (sockStatus < 0) {
-        return 1;
-    }
-
+    //if socket init has failed we finish the program.
+    if (sockStatus < 0) return EXIT_FAILURE;
+    //we set the ip to the one from the arguments and print start message.
     memset(&dest, 0, sizeof(dest));
     dest.sin_family = AF_INET;
     dest.sin_addr.s_addr = dest_ip;
     printf("traceroute to %s, %d hops max\n", inet_ntoa(*(struct in_addr *)&dest_ip), MAX_HOPS);
-    ICMP_loop(sockStatus, &dest);
+    //we call the main loop of the traceroute, with our socket and destenation ip.
+    trace_loop(sockStatus, &dest);
+    //after trace loop has finished we can clean the memory and close the socket
     cleanup();
     return EXIT_SUCCESS;
 
@@ -44,7 +44,12 @@ int parseArguments(int argc, char *argv[], unsigned int *dest_ip){
             }
         }
     }
-    if(!aFlagExists) return -1;
+    //if we have no a flag, we are missing ip parameter, so we print and quit
+    if(!aFlagExists){
+        printf("invalid arguments, use -a ip");
+        return -1;
+    }
+    //if all was ok we return 0
     return 0;
 
 }
@@ -64,7 +69,7 @@ int initSocket(){
     tv_out.tv_usec = 0;
     //in socketopt we add timeouts
     int success = setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv_out, sizeof(tv_out));
-    //if set socket options is not successfull we print we need timeout 
+    //if set socket options is not successfull we print we need timeout
     if (success < 0) {
         perror("setsockopt SO_RCVTIMEO");
         close(s);
@@ -113,10 +118,6 @@ int receive_packet(int sockStatus, char *recvbuf, size_t bufsize, struct sockadd
 void process_reply(char *recvbuf, struct sockaddr_in *from, 
                    struct timeval *tv_start, struct timeval *tv_end, 
                    struct sockaddr_in *dest, int *dest_reached, struct in_addr *last_addr) {
-
-
-    
-
     // Parse Headers to check if we hit destination
     struct ip_hdr *ip = (struct ip_hdr *)recvbuf;
     int ip_header_len = ip->ihl * 4;
@@ -131,6 +132,7 @@ void process_reply(char *recvbuf, struct sockaddr_in *from,
         printf("%-16s", inet_ntoa(from->sin_addr));
         *last_addr = from->sin_addr;//we update the IP because it has changed.
     }
+    //print rtt
     printf("%.3f ms\t", rtt);
 
 
@@ -141,27 +143,27 @@ void process_reply(char *recvbuf, struct sockaddr_in *from,
         *dest_reached = 1;
     }
     
-    // Update global stats (optional, based on your requirements)
-    numPacketsRecieved++;
 }
-int ICMP_loop(int sock, struct sockaddr_in *dest) {
+int trace_loop(int sock, struct sockaddr_in *dest) {
     char sendbuf[PKT_SIZE];
     char recvbuf[PKT_SIZE + sizeof(struct ip_hdr)];
     struct sockaddr_in from;
     struct timeval tv_start, tv_end;
     int bytes;
     int seqnNum = 0;
-   
+   //we send packet with incrementing TTL values.
     for (int ttl = 1; ttl <= MAX_HOPS; ttl++){
         //if we cannot set the ttl in the socket, we print an error
         if(setsockopt(sock, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)) < 0 ){
             perror("setsockopt IP_TTL");
             return -1;
         }
+        //helper field to make sure we only print ip once
         struct in_addr last_addr;
         memset(&last_addr, 0, sizeof(last_addr));
         printf("%d\t", ttl);
-        fflush(stdout);
+        fflush(stdout); // for printing to appear smooth
+        //send PACKET_NUMBER packets
         for (int i = 0; i < PACKET_NUMBER; i++){
             prep_packet(sendbuf, seqnNum++);
             gettimeofday(&tv_start, NULL);
@@ -175,6 +177,7 @@ int ICMP_loop(int sock, struct sockaddr_in *dest) {
         //if we got no reply we print *
         if(bytes < 0) printf(" *");
         else{
+            //if we got a packet we need to process it
             process_reply(recvbuf, &from, &tv_start, &tv_end, dest, &destanationReached, &last_addr);
         }
         fflush(stdout); // for printing to appear smooth
@@ -190,10 +193,11 @@ int ICMP_loop(int sock, struct sockaddr_in *dest) {
     //if we finished all the loops and still did not reach the destinations, we print accordingly
     if(!destanationReached) printf("Destination unreachable (Max hops exceeded).\n");
 
-    
+    //if all was sucessfull we return 0
     return 0;
 }
 void cleanup() {
+    //if the socket was opened, we close it
     if (sockStatus >= 0) close(sockStatus);
     exit(0);
 }
