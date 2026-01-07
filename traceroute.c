@@ -81,11 +81,11 @@ int initSocket(){
 }
 void prep_packet(char *sendBuffer, int seqNum) {
     memset(sendBuffer, 0, PKT_SIZE);
-    struct icmp *icmp_pkt = (struct icmp *)sendBuffer;
-    icmp_pkt->icmp_type = ICMP_ECHO;//we set header type to echo = 8 
-    icmp_pkt->icmp_code = 0;//we set code to 0
-    icmp_pkt->icmp_id = getpid() & 0xFFFF;//process ID number shortened to 16-bits
-    icmp_pkt->icmp_seq = htons(seqNum);//we set the packet seqNum number to the one from the input
+    struct icmphdr *icmp_pkt = (struct icmphdr *)sendBuffer;
+    icmp_pkt->type = ICMP_ECHO;//we set header type to echo = 8 
+    icmp_pkt->code = 0;//we set code to 0
+    icmp_pkt->un.echo.id = getpid() & 0xFFFF;//process ID number shortened to 16-bits
+    icmp_pkt->un.echo.sequence = htons(seqNum);//we set the packet seqNum number to the one from the input
 
     // Use a constant for the header size (8 bytes) to avoid struct confusion
     int header_len = 8; 
@@ -93,8 +93,8 @@ void prep_packet(char *sendBuffer, int seqNum) {
     // Fill the payload (everything after the 8-byte header)
     memset(sendBuffer + header_len, 0x42, PKT_SIZE - header_len);
 
-    icmp_pkt->icmp_cksum = 0;// to make sure trash values do not intervene with the checksum
-    icmp_pkt->icmp_cksum = calculate_checksum((unsigned short *)icmp_pkt, PKT_SIZE);//TODO - switch function
+    icmp_pkt->checksum = 0;// to make sure trash values do not intervene with the checksum
+    icmp_pkt->checksum = calculate_checksum((unsigned short *)icmp_pkt, PKT_SIZE);//TODO - switch function
 }
 int send_packet(int sockStatus, char *sendbuf, struct sockaddr_in *dest) {
     //send our packet through the socket
@@ -121,7 +121,7 @@ void process_reply(char *recvbuf, struct sockaddr_in *from,
     // Parse Headers to check if we hit destination
     struct ip_hdr *ip = (struct ip_hdr *)recvbuf;
     int ip_header_len = ip->ihl * 4;
-    struct icmp *icmp = (struct icmp *)(recvbuf + ip_header_len);
+    struct icmphdr *icmp = (struct icmphdr *)(recvbuf + ip_header_len);
         // Calculate RTT
     double rtt = (tv_end->tv_sec - tv_start->tv_sec) * 1000.0 +
                  (tv_end->tv_usec - tv_start->tv_usec) / 1000.0;
@@ -138,7 +138,7 @@ void process_reply(char *recvbuf, struct sockaddr_in *from,
 
     // Check if we reached the target
     // We check if it is an ECHO REPLY (Type 0) and comes from the destination IP
-    if (icmp->icmp_type == ICMP_ECHOREPLY && 
+    if (icmp->type == ICMP_ECHOREPLY && 
         from->sin_addr.s_addr == dest->sin_addr.s_addr) {
         *dest_reached = 1;
     }

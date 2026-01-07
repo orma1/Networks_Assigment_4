@@ -4,31 +4,20 @@
 #define PKT_SIZE 64
 #define MAX_TTL 64
 #define MAX_HOPS 30
+#define __POSIX_C_SOURCE 200809L
 struct ip_hdr{
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    __uint8_t ihl:4;      // Lower 4 bits
-    __uint8_t version:4;  // Higher 4 bits
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-    __uint8_t version:4;  // Higher 4 bits
-    __uint8_t ihl:4;      // Lower 4 bits
-#else
-    #error "Unknown Endiannes"
-#endif
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-     __uint8_t ecn:2;      // Lower 2 bits
-     __uint8_t dscp:6;     // Higher 6 bits
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-     __uint8_t dscp:6;
-     __uint8_t ecn:2;
-#endif
-    __uint16_t total_Len;
-    __uint16_t identification;
-    __uint16_t flags_FragmentOffset;
-    __uint8_t TTL;
-    __uint8_t protocol;
-    __uint16_t checksum;
-    __uint32_t src_IP_Addr;
-    __uint32_t dest_IP_Addr;
+    uint8_t ihl:4;      // Lower 4 bits
+    uint8_t version:4;  // Higher 4 bits
+    uint8_t ecn:2;      // Lower 2 bits
+    uint8_t dscp:6;     // Higher 6 bits
+    uint16_t total_Len;
+    uint16_t identification;
+    uint16_t flags_FragmentOffset;
+    uint8_t TTL;
+    uint8_t protocol;
+    uint16_t checksum;
+    uint32_t src_IP_Addr;
+    uint32_t dest_IP_Addr;
 };
 
 
