@@ -1,7 +1,6 @@
 #define PKT_SIZE 64
 #define TIMEOUT 1
 #define PACKET_NUMBER 3
-#define PKT_SIZE 64
 #define MAX_TTL 64
 #define MAX_HOPS 30
 #define __POSIX_C_SOURCE 200809L
