@@ -1,3 +1,4 @@
+#pragma once
 #define PKT_SIZE 64
 #define TIMEOUT 1
 #define PACKET_NUMBER 3

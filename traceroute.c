@@ -150,7 +150,7 @@ int trace_loop(int sock, struct sockaddr_in *dest) {
     struct sockaddr_in from;
     struct timeval tv_start, tv_end;
     int bytes;
-    int seqnNum = 0;
+    int seqNum = 0;
    //we send packet with incrementing TTL values.
     for (int ttl = 1; ttl <= MAX_HOPS; ttl++){
         //if we cannot set the ttl in the socket, we print an error
@@ -165,7 +165,7 @@ int trace_loop(int sock, struct sockaddr_in *dest) {
         fflush(stdout); // for printing to appear smooth
         //send PACKET_NUMBER packets
         for (int i = 0; i < PACKET_NUMBER; i++){
-            prep_packet(sendbuf, seqnNum++);
+            prep_packet(sendbuf, seqNum++);
             gettimeofday(&tv_start, NULL);
             //if the packet sending failed - we print *
             if(send_packet(sock, sendbuf, dest) < 0){
