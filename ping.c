@@ -19,7 +19,7 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER; // Mutex for thread safety
 int numPacketsRecieved = 0;
 int numPacketsSent = 0;
 int sockStatus = -1;
-int floodMode = 0;
+int floodMode = 0; // TODO: make -f just a flag witout args
 struct sockaddr_in dest;
 RingBuffer ring_buffer;
 
@@ -41,7 +41,6 @@ int main(int argc, char *argv[]){
         printf("failed to set buffer ring dynamic memory");
         return EXIT_FAILURE;
     }
-
     ring_buffer.buffer = b;
     ring_buffer.size = 1024;
       
@@ -71,7 +70,7 @@ int main(int argc, char *argv[]){
            inet_ntoa(*(struct in_addr *)&dest_ip), 
            PKT_SIZE - sizeof(struct icmphdr));
     
-
+    // Thread sender args
     SenderArgs sender_args = {
         .dest = &dest,
         .ring_buffer = &ring_buffer,
@@ -79,6 +78,7 @@ int main(int argc, char *argv[]){
         .count = count
     };
 
+    // Thread receiver args
     ReceiverArgs receiver_args = {
         .ring_buffer = &ring_buffer,
         .sock = sockStatus,
@@ -238,15 +238,13 @@ void process_reply(char *recvbuf, int bytes, struct sockaddr_in *from,
     // pointer to the start of ICMP packet data relative to recvbuf.
     struct icmp *icmp_reply = (struct icmp *)(recvbuf + hlen);
 
-    
-
     //if we got icmp_type 0 and we are the right process
     if (icmp_reply->icmp_type == ICMP_ECHOREPLY && 
         icmp_reply->icmp_id == (getpid() & 0xFFFF)) {
 
-        int seqNum = ntohs(icmp_reply->icmp_seq);
+        int seqNum = ntohs(icmp_reply->icmp_seq); // From big endian to little
         struct timeval *tv_start = address_in_ringbuffer(ring_buffer, seqNum);
-
+        // TODO: Check if the address in buffer in not NULL;
 
         numPacketsRecieved++;//for statistics.
         //we calculate RTT using start time and end time (from packets we got) 
@@ -304,6 +302,8 @@ void cleanup(int sig) {
     exit(0);
 }
 
+
+// -- Legacy Code --
 int ping_loop(int count, int sock, struct sockaddr_in *dest) {
     char sendbuf[PKT_SIZE];
     char recvbuf[PKT_SIZE + sizeof(struct ip)];
@@ -340,6 +340,8 @@ int ping_loop(int count, int sock, struct sockaddr_in *dest) {
     
     return 0;
 }
+
+
 /*
 * @brief A checksum function that returns 16 bit checksum for data.
 * @param data The data to do the checksum for.
@@ -371,6 +373,7 @@ unsigned short int calculate_checksum(void *data, unsigned int bytes) {
     return (~((unsigned short int)total_sum));
 }
 
+// TODO: delete later
 int ring_buffer_push(RingBuffer *buff, int seqNum ,struct timeval data) {
     buff->buffer[seqNum % buff->size] = data;
     return 0;
@@ -396,9 +399,11 @@ void *sender_thread(void *arg) {
         pthread_mutex_unlock(&lock);
 
         bytes = send_packet(args->sock, args->sendbuf, args->dest);
+        // TODO: Maybe remove check or reduce the numPacketnumber again
         if (bytes < 0) {
             continue;
         }
+
         if (!floodMode){
             sleep(1);
         }
