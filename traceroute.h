@@ -12,7 +12,7 @@ struct ip_hdr{
     uint8_t dscp:6;     // Higher 6 bits
     uint16_t total_Len;
     uint16_t identification;
-    uint16_t flags_FragmentOffset;
+    uint16_t flags_FragmentOffset;//TODO - implement masks. make sure to use nthos
     uint8_t TTL;
     uint8_t protocol;
     uint16_t checksum;
