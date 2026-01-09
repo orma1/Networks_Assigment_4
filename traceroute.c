@@ -75,27 +75,60 @@ int initSocket(){
         close(s);
         return -1;
     }
+    int one = 1;
+    //we need to set IP_HDRINCL to tell the kernel that we are including the IP header ourselves
+    success = setsockopt(s, IPPROTO_IP, IP_HDRINCL, &one, sizeof(one));
+    if (success < 0) {
+        perror("setsockopt IP_HDRINCL");
+        return -1;
+    }
 
     //if all was ok we return the socket.
     return s;  
 }
-void prep_packet(char *sendBuffer, int seqNum) {
-    //TODO - make ip hdr manual.
+void prep_packet(char *sendBuffer, int seqNum, int ttl, unsigned int dest_ip) {
+    
     memset(sendBuffer, 0, PKT_SIZE);
-    struct icmphdr *icmp_pkt = (struct icmphdr *)sendBuffer;
+
+    struct ip_hdr *ip = (struct ip_hdr *)sendBuffer;
+    // The ICMP header starts immediately after the IP header (20 bytes later)
+    struct icmphdr *icmp_pkt = (struct icmphdr *)(sendBuffer + sizeof(struct ip_hdr));
+
+    //Fill IP Header
+    ip->ihl = 5;        // Header length in 32-bit words (5 * 4 = 20 bytes)
+    ip->version = 4;    // IPv4
+    ip->ecn = 0;
+    ip->dscp = 0;
+    
+    // Total Length = IP Header + ICMP Header + Data
+    // We assume PKT_SIZE is the total size of the buffer we are sending
+    ip->total_Len = htons(PKT_SIZE); 
+    
+    ip->identification = htons(getpid() & 0xFFFF);
+    ip->flags_FragmentOffset = 0; // No special flags, offset 0
+    ip->TTL = ttl;                // MUST be set here when using manual headers
+    ip->protocol = IPPROTO_ICMP;
+    ip->src_IP_Addr = INADDR_ANY; // Kernel will fill this automatically
+    ip->dest_IP_Addr = dest_ip;   // The target IP
+    ip->checksum = 0;
+    ip->checksum = calculate_checksum((unsigned short *)ip, sizeof(struct ip_hdr));
+    //Fill ICMP Header
     icmp_pkt->type = ICMP_ECHO;//we set header type to echo = 8 
     icmp_pkt->code = 0;//we set code to 0
     icmp_pkt->un.echo.id = getpid() & 0xFFFF;//process ID number shortened to 16-bits
     icmp_pkt->un.echo.sequence = htons(seqNum);//we set the packet seqNum number to the one from the input
 
-    // Use a constant for the header size (8 bytes) to avoid struct confusion
-    int header_len = 8; 
+    char *payload_ptr = (char *)icmp_pkt + sizeof(struct icmphdr);//start if ICMP packet payload
     
-    // Fill the payload (everything after the 8-byte header)
-    memset(sendBuffer + header_len, 0x42, PKT_SIZE - header_len);
-
+    // The length of data all - ip header - icmp header
+    int payload_len = PKT_SIZE - sizeof(struct ip_hdr) - sizeof(struct icmphdr);
+    
+    //only fill payload if there is space
+    if (payload_len > 0) {
+        memset(payload_ptr, 0x42, payload_len);
+    }
     icmp_pkt->checksum = 0;// to make sure trash values do not intervene with the checksum
-    icmp_pkt->checksum = calculate_checksum((unsigned short *)icmp_pkt, PKT_SIZE);//TODO - switch function
+    icmp_pkt->checksum = calculate_checksum((unsigned short *)icmp_pkt, PKT_SIZE - sizeof(struct ip_hdr));
 }
 int send_packet(int sockStatus, char *sendbuf, struct sockaddr_in *dest) {
 
@@ -155,11 +188,6 @@ int trace_loop(int sock, struct sockaddr_in *dest) {
     int seqNum = 0;
    //we send packet with incrementing TTL values.
     for (int ttl = 1; ttl <= MAX_HOPS; ttl++){
-        //if we cannot set the ttl in the socket, we print an error
-        if(setsockopt(sock, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)) < 0 ){
-            perror("setsockopt IP_TTL");
-            return -1;
-        }
         //helper field to make sure we only print ip once
         struct in_addr last_addr;
         memset(&last_addr, 0, sizeof(last_addr));
@@ -167,7 +195,7 @@ int trace_loop(int sock, struct sockaddr_in *dest) {
         fflush(stdout); // for printing to appear smooth
         //send PACKET_NUMBER packets
         for (int i = 0; i < PACKET_NUMBER; i++){
-            prep_packet(sendbuf, seqNum++);
+            prep_packet(sendbuf, seqNum++, ttl, dest->sin_addr.s_addr);
             gettimeofday(&tv_start, NULL);
             //if the packet sending failed - we print *
             if(send_packet(sock, sendbuf, dest) < 0){

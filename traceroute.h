@@ -23,7 +23,7 @@ struct ip_hdr{
 
 int parseArguments(int argc, char *argv[], unsigned int *dest_ip);
 int initSocket();
-void prep_packet(char *sendBuffer, int seqNum);
+void prep_packet(char *sendBuffer, int seqNum, int ttl, unsigned int dest_ip);
 int send_packet(int sockStatus, char *sendbuf, struct sockaddr_in *dest);
 int receive_packet(int sockStatus, char *recvbuf, size_t bufsize, struct sockaddr_in *from);
 void process_reply(char *recvbuf, struct sockaddr_in *from, 

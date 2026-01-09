@@ -89,7 +89,6 @@ int initSocket(){
     return s;
 }
 void prep_packet(char *sendBuffer, int seqNum) {
-    //TODO - make ip hdr manual.
     memset(sendBuffer, 0, PKT_SIZE);
     struct icmphdr *icmp_pkt = (struct icmphdr *)sendBuffer;
     icmp_pkt->type = ICMP_ECHO;//we set header type to echo = 8 
@@ -104,7 +103,7 @@ void prep_packet(char *sendBuffer, int seqNum) {
     memset(sendBuffer + header_len, 0x42, PKT_SIZE - header_len);
 
     icmp_pkt->checksum = 0;// to make sure trash values do not intervene with the checksum
-    icmp_pkt->checksum = calculate_checksum((unsigned short *)icmp_pkt, PKT_SIZE);//TODO - switch function
+    icmp_pkt->checksum = calculate_checksum((unsigned short *)icmp_pkt, PKT_SIZE);
 }
 int send_packet(int sockStatus, char *sendbuf, struct sockaddr_in *dest) {
 
