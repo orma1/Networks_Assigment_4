@@ -171,6 +171,7 @@ int initSocket(){
     return s;  
 }
 
+// Legacy code
 void * initDestStruct(struct in_addr * dest_addr){
     struct sockaddr_in dest; //create sockaddr
     memset(&dest, 0, sizeof(dest));
