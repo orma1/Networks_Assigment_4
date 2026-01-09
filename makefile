@@ -5,10 +5,10 @@ CFLAGS=-Wall -Wextra -g -pthread $(INCDIRS) $(OPT)
 LDLIBS=-lm
 
 
-CFILES=ping.c
-OBJECTS=ping.o
+CFILES=port_scanning.c
+OBJECTS=port_scanning.o
 
-BINARY=myping
+BINARY=port_scanning_tcp
 .PHONY: all clean traceroute
 all: $(BINARY)
 
