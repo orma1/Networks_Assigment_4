@@ -5,7 +5,7 @@
 #define MAX_PORTS 100000
 #define TIMEOUT 1
 #define START_RANGE 1
-#define MAX_RANGE 8085
+#define MAX_RANGE 65535
 // 65535
 // --- Structs ---
 

@@ -8,7 +8,7 @@ LDLIBS=-lm
 CFILES=ping.c traceroute.c port_scanning.c discovery.c
 OBJECTS=ping.o traceroute.o port_scanning.o discovery.o
 
-BINARY=myping mytrace mydiscovery
+BINARY=myping mytrace mydiscovery myport_scanning
 .PHONY: all clean
 all: $(BINARY)
 
@@ -20,6 +20,10 @@ mytrace: traceroute.o
 
 mydiscovery: discovery.o
 	$(CC) $(CFLAGS) -o discovery discovery.o $(LDLIBS)
+
+myport_scanning: port_scanning.o
+	$(CC) $(CFLAGS) -o port_scanning port_scanning.o $(LDLIBS)
+
 %.o:%.c 
 	$(CC) $(CFLAGS) -c -o $@ $^ $(LDLIBS)
 

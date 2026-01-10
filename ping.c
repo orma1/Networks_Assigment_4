@@ -44,18 +44,18 @@ int main(int argc, char *argv[]){
     ring_buffer.size = 1024;
 
     //if parseArguments did not succeed we exit the program
-    if(parseArguments(argc,argv, &dest_ip, &aFlagExists, &count) < 0) return EXIT_FAILURE;
-    
-    //if we have count print it
-     if(count) printf("count: %d\n",count);
-    //if we have flood print it.
-     if(floodMode) printf("flood mode activated\n");
-     //ctrl+c activates cleanup
-     signal(SIGINT, cleanup);
+    if(parseArguments(argc,argv, &dest_ip, &aFlagExists, &count) < 0) {
+        cleanup();
+        return EXIT_FAILURE;
+    }
+
+    //ctrl+c activates cleanup
+    signal(SIGINT, cleanup);
     
     sockStatus = initSocket();
     if (sockStatus < 0) {
-        return 1;
+        cleanup();
+        return EXIT_FAILURE;
     }
     
     // init dest
@@ -91,7 +91,7 @@ int main(int argc, char *argv[]){
     pthread_join(receiverT, NULL);
 
     // We are done
-    cleanup(0);
+    cleanup();
 
     return EXIT_SUCCESS;
 }
@@ -187,8 +187,8 @@ void prep_packet(char *sendBuffer, int seqNum) {
     // Fill the payload (everything after the 8-byte header)
     memset(sendBuffer + header_len, 0x42, PKT_SIZE - header_len);
 
-    icmp_pkt->icmp_cksum = 0;// to make sure trash values do not intervene with the checksum
-    icmp_pkt->icmp_cksum = calculate_checksum((unsigned short *)icmp_pkt, PKT_SIZE);//TODO - switch function
+    icmp_pkt->icmp_cksum = 0;
+    icmp_pkt->icmp_cksum = calculate_checksum((unsigned short *)icmp_pkt, PKT_SIZE);
 }
 
 
@@ -215,51 +215,36 @@ int receive_packet(int sockStatus, char *recvbuf, size_t bufsize, struct sockadd
 }
 
 // Thread Function
-void process_reply(char *recvbuf, int bytes, struct sockaddr_in *from, 
-                   /*TODO-check needed fields*/struct timeval *tv_end, RingBuffer *ring_buffer) {
-
-    struct ip *ip_hdr = (struct ip *)recvbuf;//IPV4 address of replier.
-    int hlen = ip_hdr->ip_hl << 2;//20 bytes of IPV4 - TODO change it to hardcoded
-
-    
+void process_reply(char *recvbuf, int bytes, struct sockaddr_in *from, struct timeval *tv_end, RingBuffer *ring_buffer) {
+    struct ip *ip_hdr = (struct ip *)recvbuf;// IPV4 address of replier.
+    int hlen = ip_hdr->ip_hl << 2;// 20 bytes of IPV4 
     // pointer to the start of ICMP packet data relative to recvbuf.
     struct icmp *icmp_reply = (struct icmp *)(recvbuf + hlen);
-
     //if we got icmp_type 0 and we are the right process
     if (icmp_reply->icmp_type == ICMP_ECHOREPLY && 
         icmp_reply->icmp_id == (getpid() & 0xFFFF)) {
-
         int seqNum = ntohs(icmp_reply->icmp_seq); // From big endian to little
         struct timeval *tv_start = address_in_ringbuffer(ring_buffer, seqNum);
-        // TODO: Check if the address in buffer in not NULL;
-
         numPacketsRecieved++;//for statistics.
         //we calculate RTT using start time and end time (from packets we got) 
         double rtt = (tv_end->tv_sec - tv_start->tv_sec) * 1000.0 +
                    (tv_end->tv_usec - tv_start->tv_usec) / 1000.0;
-
-        // Update max
+        // Update statistics
         if (max_rtt < rtt){
             max_rtt = rtt;
         }
-        // update min
         if (min_rtt > rtt){
             min_rtt = rtt;
         }
-        // update sum
         sum_rtt += rtt;
-        // Sum of squares for mdev
         sum_sq_rtt += (rtt * rtt);
-
-        //we print statistics about the reply packet
         printf("%d bytes from %s: icmp_seq=%d ttl=%d time=%.3f ms\n",
                bytes - hlen,//number of bytes without the header length
                inet_ntoa(from->sin_addr), //IP address of replier
                seqNum, //seq_Num from the packet
                ip_hdr->ip_ttl, //TTL from the packet
                rtt
-            ); //RTT we calculated
-
+            ); 
     }
 }
 
