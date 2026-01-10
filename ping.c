@@ -33,7 +33,6 @@ double sum_sq_rtt = 0.0; // Sum of squares for mdev
 int main(int argc, char *argv[]){
     int aFlagExists = 0; //we have to make sure -a exists as it is mandatory.
     int count = 0;
-    int flood = 0;
     unsigned int dest_ip;
 
     struct timeval *b = (struct timeval *)calloc(1024, sizeof(struct timeval));
@@ -43,16 +42,14 @@ int main(int argc, char *argv[]){
     }
     ring_buffer.buffer = b;
     ring_buffer.size = 1024;
-      
 
     //if parseArguments did not succeed we exit the program
-    if(parseArguments(argc,argv, &dest_ip, &aFlagExists, &count, &flood) < 0) return EXIT_FAILURE;
-    //ip is mandatory so we print it always
-    printf("ip is %s\n", inet_ntoa(*(struct in_addr *)&dest_ip));
+    if(parseArguments(argc,argv, &dest_ip, &aFlagExists, &count) < 0) return EXIT_FAILURE;
+    
     //if we have count print it
      if(count) printf("count: %d\n",count);
     //if we have flood print it.
-     if(flood) printf("flood: %d\n", flood);
+     if(floodMode) printf("flood mode activated\n");
      //ctrl+c activates cleanup
      signal(SIGINT, cleanup);
     
@@ -61,15 +58,13 @@ int main(int argc, char *argv[]){
         return 1;
     }
     
+    // init dest
     memset(&dest, 0, sizeof(dest));
     dest.sin_family = AF_INET;
     dest.sin_addr.s_addr = dest_ip;
     
-    printf("PING %s (%s): %ld data bytes\n", 
-           argv[1], 
-           inet_ntoa(*(struct in_addr *)&dest_ip), 
-           PKT_SIZE - sizeof(struct icmphdr));
-    
+    start_ping_message(&dest.sin_addr.s_addr, count);
+
     // Thread sender args
     SenderArgs sender_args = {
         .dest = &dest,
@@ -101,7 +96,7 @@ int main(int argc, char *argv[]){
     return EXIT_SUCCESS;
 }
 
-int parseArguments(int argc, char *argv[], unsigned int *ip, int* aFlagExists, int* count, int* flood){
+int parseArguments(int argc, char *argv[], unsigned int *ip, int* aFlagExists, int* count){
     for(int i = 0; i < argc; i++){
         if(strcmp(argv[i], "-a") == 0 && i+1 < argc){//we check both if we have -a and another field after for the ip address.
             *aFlagExists = 1;//if so we found the aFlag.
@@ -119,22 +114,12 @@ int parseArguments(int argc, char *argv[], unsigned int *ip, int* aFlagExists, i
                 return -1;
             }
             if (*count == 0){
-                printf("Error: -c must be an integer.\n");
+                printf("Error: -c must be an integer (in range of 1 to 255).\n");
                 return -1;
             }
         }
-        if(strcmp(argv[i], "-f") == 0 && i+1 < argc){
-            *flood = atoi(argv[i+1]);
-            if (*flood <= 0){
-                printf("Error: flood must be positive\n");
-            }
-            if (*flood == 0){
-                printf("Error: -f must be an integer.\n");
-                return -1;
-            }
-            if (*flood > 0){
-                floodMode = 1;
-            }
+        if(strcmp(argv[i], "-f") == 0){    
+            floodMode = 1;
         }
     }
            if(!*aFlagExists){
@@ -171,18 +156,20 @@ int initSocket(){
     return s;  
 }
 
-void * initDestStruct(struct in_addr * dest_addr){
-    struct sockaddr_in dest; //create sockaddr
-    memset(&dest, 0, sizeof(dest));
-    dest.sin_family = AF_INET;//set family to IPV4
-    dest.sin_addr.s_addr = dest_addr;//set IP address to the one we got from argv.
-    return &dest;
-}
 
-void start_ping_message(struct in_addr * dest_addr){
-   printf("PING  (%s): %ld data bytes\n", 
-           inet_ntoa((struct in_addr)*dest_addr), 
-           PKT_SIZE - sizeof(struct icmphdr)); 
+void start_ping_message(struct in_addr *dest_addr, int count){
+    char *message; 
+    if (floodMode){
+        message = "Activated";
+    }else {
+        message = "Deactivated";
+    }
+
+    printf("\n=============================================================\n");
+    printf("   PING SESSION: %s\n", inet_ntoa((struct in_addr)*dest_addr));
+    printf("   PACKET SIZE:  %ld bytes\n", PKT_SIZE - sizeof(struct icmphdr));
+    printf("   Flags: -f: %s, -c: %d \n", message, count);
+    printf("=============================================================\n");
 }
 
 // Thread Function
@@ -276,23 +263,25 @@ void process_reply(char *recvbuf, int bytes, struct sockaddr_in *from,
     }
 }
 
-void cleanup(int sig) {
-    printf("\n--- %s ping statistics ---\n", inet_ntoa(dest.sin_addr));
+void cleanup() {
+    printf("\n=============================================================\n");
+    printf("--- %s ping statistics ---\n", inet_ntoa(dest.sin_addr));
     
     float loss = 0.0;
     if (numPacketsSent > 0)
         loss = 100.0 * (numPacketsSent - numPacketsRecieved) / numPacketsSent;
     
     printf("%d packets transmitted, %d received, %.1f%% packet loss\nrtt min/avg/max/mdev = %.2f/%.2f/%.2f/%.2f \n",
-           numPacketsSent, 
-           numPacketsRecieved, 
-           loss,
+            numPacketsSent, 
+            numPacketsRecieved, 
+            loss,
             min_rtt,
             sum_rtt/numPacketsRecieved,
             max_rtt,
             sqrt((sum_sq_rtt/numPacketsRecieved) - (sum_rtt/numPacketsRecieved)*(sum_rtt/numPacketsRecieved))
         );
 
+    printf("=============================================================\n");
     if (sockStatus >= 0) 
         close(sockStatus);
 
@@ -301,46 +290,6 @@ void cleanup(int sig) {
     pthread_mutex_destroy(&lock);
     exit(0);
 }
-
-
-// -- Legacy Code --
-int ping_loop(int count, int sock, struct sockaddr_in *dest) {
-    char sendbuf[PKT_SIZE];
-    char recvbuf[PKT_SIZE + sizeof(struct ip)];
-    struct sockaddr_in from;
-    struct timeval tv_start, tv_end;
-    int bytes;
-    
-    while (count == 0 || numPacketsSent < count) {
-        prep_packet(sendbuf, numPacketsSent++);
-        
-        gettimeofday(&tv_start, NULL);
-        
-        bytes = send_packet(sock, sendbuf, dest);
-        if (bytes < 0) {
-            continue;
-        }
-        
-        bytes = receive_packet(sock, recvbuf, sizeof(recvbuf), &from);
-        
-        gettimeofday(&tv_end, NULL);
-        
-        if (bytes < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) { // Same error nowdays, but in legacy Linux had diffrent value
-                printf("Request timeout for icmp_seq=%d\n", numPacketsSent - 1); 
-            } else {
-                perror("recvfrom error");
-            }
-        } else {
-            process_reply(recvbuf, bytes, &from, &tv_start, &tv_end);
-        }
-        
-        sleep(1);
-    }
-    
-    return 0;
-}
-
 
 /*
 * @brief A checksum function that returns 16 bit checksum for data.
@@ -373,12 +322,6 @@ unsigned short int calculate_checksum(void *data, unsigned int bytes) {
     return (~((unsigned short int)total_sum));
 }
 
-// TODO: delete later
-int ring_buffer_push(RingBuffer *buff, int seqNum ,struct timeval data) {
-    buff->buffer[seqNum % buff->size] = data;
-    return 0;
-}
-
 void* address_in_ringbuffer(RingBuffer *buff, int seqNum) {
     return &buff->buffer[seqNum % buff->size];
 }
@@ -389,9 +332,7 @@ void *sender_thread(void *arg) {
     struct sender_args *args = (struct sender_args *)arg;
     int bytes;
     while(args->count == 0 || numPacketsSent < args->count) {
-
         pthread_mutex_lock(&lock);
-
         prep_packet(args->sendbuf, numPacketsSent);
         gettimeofday(address_in_ringbuffer(args->ring_buffer ,numPacketsSent), NULL);
         numPacketsSent++;
@@ -399,9 +340,10 @@ void *sender_thread(void *arg) {
         pthread_mutex_unlock(&lock);
 
         bytes = send_packet(args->sock, args->sendbuf, args->dest);
-        // TODO: Maybe remove check or reduce the numPacketnumber again
         if (bytes < 0) {
-            continue;
+            // if failed to send it's a packet loss
+            printf("Error: failed to send a packet\n");
+            perror("ping: sendto");
         }
 
         if (!floodMode){
