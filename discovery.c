@@ -32,7 +32,8 @@ int parseArguments(int argc, char *argv[], unsigned int *ip, int *c){
     int aFlagExists = 0;
     int cFlagExists = 0;
     for(int i = 0; i < argc; i++){
-        if(strcmp(argv[i], "-a") == 0 && i+1 < argc){//we check both if we have -a and another field after for the ip address.
+        //we check both if we have -a and another field after for the ip address.
+        if(strcmp(argv[i], "-a") == 0 && i+1 < argc){
             aFlagExists = 1;//if so we found -a
             //check if the IP is valid
             if (inet_pton(AF_INET, argv[i+1], ip) == 1);
@@ -91,18 +92,22 @@ int initSocket(){
 void prep_packet(char *sendBuffer, int seqNum) {
     memset(sendBuffer, 0, PKT_SIZE);
     struct icmphdr *icmp_pkt = (struct icmphdr *)sendBuffer;
-    icmp_pkt->type = ICMP_ECHO;//we set header type to echo = 8 
-    icmp_pkt->code = 0;//we set code to 0
-    icmp_pkt->un.echo.id = htons(getpid() & 0xFFFF);//process ID number shortened to 16-bits
-    icmp_pkt->un.echo.sequence = htons(seqNum);//we set the packet seqNum number to the one from the input
+    //we set header type to echo = 8
+    icmp_pkt->type = ICMP_ECHO;
+    //we set code to 0
+    icmp_pkt->code = 0;
+    //process ID number shortened to 16-bits
+    icmp_pkt->un.echo.id = htons(getpid() & 0xFFFF);
+    //we set the packet seqNum number to the one from the input
+    icmp_pkt->un.echo.sequence = htons(seqNum);
 
     // Use a constant for the header size (8 bytes) to avoid struct confusion
     int header_len = 8; 
     
     // Fill the payload (everything after the 8-byte header)
     memset(sendBuffer + header_len, 0x42, PKT_SIZE - header_len);
-
-    icmp_pkt->checksum = 0;// to make sure trash values do not intervene with the checksum
+    // to make sure trash values do not intervene with the checksum
+    icmp_pkt->checksum = 0;
     icmp_pkt->checksum = calculate_checksum((unsigned short *)icmp_pkt, PKT_SIZE);
 }
 int send_packet(int sockStatus, char *sendbuf, struct sockaddr_in *dest) {
@@ -132,7 +137,8 @@ void ipDiscoveryLoop(int c){
     uint32_t ip = ntohl(dest.sin_addr.s_addr);
     struct sockaddr_in from;
     int seqNum = 0;
-    uint32_t startIp = ip & mask;//we do not start from given ip, we start from the start of the subnet.
+    //we do not start from given ip, we start from the start of the subnet.
+    uint32_t startIp = ip & mask;
     char sendbuf[PKT_SIZE];
     char recvbuf[PKT_SIZE + sizeof(struct iphdr)];
     int bytes;
@@ -161,7 +167,7 @@ void ipDiscoveryLoop(int c){
 
             //check if Echo Reply and if this packet is for out program
             if (icmp_reply->type == ICMP_ECHOREPLY && ntohs(icmp_reply->un.echo.id) == (getpid() & 0xFFFF)) {
-                    //check sequence numbers to make sure it is not delayed packet and increment for next iteration
+                    //check sequence numbers to make sure it is not delayed packet
                     if (ntohs(icmp_reply->un.echo.sequence) == seqNum) {
                         printf("%s\n", inet_ntoa(from.sin_addr));
                     }
