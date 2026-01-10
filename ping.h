@@ -33,15 +33,15 @@ typedef struct receiver_args{
 
 // Functions declarations
 
-int parseArguments(int argc, char *argv[], unsigned int *ip, int* aFlagExists, int* count, int* flood);
+int parseArguments(int argc, char *argv[], unsigned int *ip, int* aFlagExists, int* count);
 int initSocket();
 void * initDestStruct(struct in_addr * dest_addr);
-void start_ping_message(struct in_addr * dest_addr);
+void start_ping_message(struct in_addr *dest_addr, int count);
 void prep_packet(char * sendBuffer, int seqNum);
 int send_packet(int sockStatus, char *sendbuf, struct sockaddr_in *dest);
 int receive_packet(int sockStatus, char *recvbuf, size_t bufsize, struct sockaddr_in *from);
 void process_reply(char *recvbuf, int bytes, struct sockaddr_in *from, struct timeval *tv_end, RingBuffer *ring_buffer);
-void cleanup(int sig);
+void cleanup();
 int ping_loop(int count, int sock, struct sockaddr_in *dest);
 unsigned short int calculate_checksum(void *data, unsigned int bytes);
 void initialize_mutex();

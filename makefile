@@ -5,8 +5,8 @@ CFLAGS=-Wall -Wextra -g -pthread $(INCDIRS) $(OPT)
 LDLIBS=-lm
 
 
-CFILES=ping.c traceroute.c  discovery.c
-OBJECTS=ping.o traceroute.o discovery.o
+CFILES=ping.c traceroute.c port_scanning.c discovery.c
+OBJECTS=ping.o traceroute.o port_scanning.o discovery.o
 
 BINARY=myping mytrace mydiscovery
 .PHONY: all clean
