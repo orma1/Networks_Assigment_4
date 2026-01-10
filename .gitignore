@@ -1,3 +1,6 @@
-traceroute
-traceroute.o
-traceroute
+*.o
+myping
+discovery
+mytrace 
+mydiscovery 
+myport_scanning
