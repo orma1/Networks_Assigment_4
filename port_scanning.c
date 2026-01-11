@@ -167,9 +167,7 @@ int main(int argc, char *argv[]){
                         // Validate packet length to avoid crashes on small junk packets
                         if (bytes >= sizeof(struct iphdr) + sizeof(struct udphdr)) {
                             struct udphdr *ptr = (struct udphdr *)&udp_packet_response[sizeof(struct iphdr)];
-                            
                             if (ntohs(ptr->uh_sport) == curr_port) {
-                                // MATCH! Open Port.
                                 add_port(open_ports, curr_port);
                                 curr_port++; // Move to next port
                                 seqNum = rand();
@@ -181,24 +179,19 @@ int main(int argc, char *argv[]){
                     // Check ICMP Socket
                     if (FD_ISSET(ICMP_SOCK, &listener)) {
                         bytes = recvfrom(ICMP_SOCK, icmp_packet_response, sizeof(icmp_packet_response), 0, (struct sockaddr *)dest, &addr_len);
-                        
                         // We need at least 56 bytes (IP + ICMP + Inner IP + Inner UDP)
                         if (bytes >= 56) {
                             struct icmphdr *ptr = (struct icmphdr *)&icmp_packet_response[sizeof(struct iphdr)];
-                            
                             if (ptr->type == ICMP_DEST_UNREACH && ptr->code == ICMP_PORT_UNREACH) {
-                                // 1. Jump over ICMP Header (8 bytes) to get Inner IP
+                                // Jump over ICMP Header (8 bytes) to get Inner IP
                                 struct iphdr *inner_ip = (struct iphdr *)((char *)ptr + 8);
-                                
-                                // 2. Jump over Inner IP Header to get Inner UDP
+                                // Jump over Inner IP Header to get Inner UDP
                                 int inner_ip_len = inner_ip->ihl * 4;
                                 struct udphdr *inner_udp = (struct udphdr *)((char *)inner_ip + inner_ip_len);
-                                
                                 // KEEP ONLY FOR DEBUG. 
                                 // int failed_port = ntohs(inner_udp->uh_dport);
                                 // printf("\n[DEBUG] ICMP Error Received! Failed Port: %d | Current Scan: %d\n", failed_port, curr_port);
-
-                                // 3. ONLY fail if the error is for the CURRENT port
+                                // ONLY fail if the error is for the CURRENT port
                                 if (ntohs(inner_udp->uh_dport) == curr_port) {
                                     printf("Port is closed: %d\n", curr_port);
                                     curr_port++; 
