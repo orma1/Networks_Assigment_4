@@ -79,10 +79,11 @@ int main(int argc, char *argv[]){
                         break; 
                     }
 
-                    struct tcphdr *tcp_resp = (struct tcphdr *)(tcp_packet_response + sizeof(struct iphdr));
+                    struct iphdr *ip_resp = (struct iphdr *)tcp_packet_response;
+                    int ip_header_len = ip_resp->ihl * 4; // IHL is in 32-bit words
+                    struct tcphdr *tcp_resp = (struct tcphdr *)(tcp_packet_response + ip_header_len);
                     // FILTER: Check if this packet is actually the reply to our scan
                     if (ntohs(tcp_resp->th_dport) == our_port && ntohs(tcp_resp->th_sport) == curr_port) {
-                        
                         printf("Recieved an answer from port num %d \n", curr_port);
                         // check the flags.
                         if ((tcp_resp->th_flags & (TH_SYN | TH_ACK)) == (TH_SYN | TH_ACK)) {
@@ -93,6 +94,9 @@ int main(int argc, char *argv[]){
                             prepare_packet(TH_RST);
                             sendto(sock, tcp_header, sizeof(*tcp_header), 0, (struct sockaddr *)dest, sizeof(*dest));
                             seqNum = rand();
+                        }
+                        else if (tcp_resp->th_flags & TH_RST) {
+                            printf("Port %d is closed (RST flag received)\n", curr_port);
                         }
                         break; 
                     }

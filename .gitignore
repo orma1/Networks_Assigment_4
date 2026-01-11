@@ -1,6 +1,8 @@
 *.o
 myping
 discovery
+traceroute
 mytrace 
 mydiscovery 
 myport_scanning
+port_scanning
