@@ -161,21 +161,32 @@ void process_reply(char *recvbuf, struct sockaddr_in *from,
     double rtt = (tv_end->tv_sec - tv_start->tv_sec) * 1000.0 +
                  (tv_end->tv_usec - tv_start->tv_usec) / 1000.0;
     
-    // if ip changed - we print it. note for the first packet in the batch, it will print always
-    if(from->sin_addr.s_addr != last_addr->s_addr){
+    //check if type is ICMP_TIME_EXCEEDED we did not get to the target.
+    if(icmp->type == ICMP_TIME_EXCEEDED){
+        // if ip changed - we print it. note for the first packet in the batch, it will print always
+        if(from->sin_addr.s_addr != last_addr->s_addr){
         //we force ip to be aligned with 16 chars, because it can be longer or shorter then 16 chars.
         printf("%-16s", inet_ntoa(from->sin_addr));
         *last_addr = from->sin_addr;//we update the IP because it has changed.
+        //print rtt
     }
-    //print rtt
-    printf("%.3f ms\t", rtt);
-
-
+     printf("%.3f ms\t", rtt);
+   }
+   
     // Check if we reached the target
     // We check if it is an ECHO REPLY (Type 0) and comes from the destination IP
-    if (icmp->type == ICMP_ECHOREPLY && 
-        from->sin_addr.s_addr == dest->sin_addr.s_addr) {
+    // Here we also check the id - is it meant for us?
+    else if (icmp->type == ICMP_ECHOREPLY && 
+        from->sin_addr.s_addr == dest->sin_addr.s_addr && icmp->un.echo.id == (getpid() & 0xFFFF)) {
+           if(from->sin_addr.s_addr != last_addr->s_addr){
+        //we force ip to be aligned with 16 chars, because it can be longer or shorter then 16 chars.
+        printf("%-16s", inet_ntoa(from->sin_addr));
+        *last_addr = from->sin_addr;//we update the IP because it has changed.
+        //print rtt
+        }
         *dest_reached = 1;
+        //print rtt
+        printf("%.3f ms\t", rtt);
     }
     
 }
