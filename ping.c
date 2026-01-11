@@ -24,6 +24,8 @@ struct sockaddr_in dest;
 RingBuffer ring_buffer;
 
 // For stats
+struct timeval startGlobalClock;
+struct timeval endGlobalClock;
 double min_rtt = 9999.0;
 double max_rtt = 0.0;
 double sum_rtt = 0.0;
@@ -31,10 +33,10 @@ double sum_sq_rtt = 0.0; // Sum of squares for mdev
 
 
 int main(int argc, char *argv[]){
+    gettimeofday(&startGlobalClock, NULL);
     int aFlagExists = 0; //we have to make sure -a exists as it is mandatory.
     int count = 0;
     unsigned int dest_ip;
-
     struct timeval *b = (struct timeval *)calloc(1024, sizeof(struct timeval));
     if (!b){
         printf("failed to set buffer ring dynamic memory");
@@ -42,29 +44,23 @@ int main(int argc, char *argv[]){
     }
     ring_buffer.buffer = b;
     ring_buffer.size = 1024;
-
     //if parseArguments did not succeed we exit the program
     if(parseArguments(argc,argv, &dest_ip, &aFlagExists, &count) < 0) {
         cleanup();
         return EXIT_FAILURE;
     }
-
     //ctrl+c activates cleanup
     signal(SIGINT, cleanup);
-    
     sockStatus = initSocket();
     if (sockStatus < 0) {
         cleanup();
         return EXIT_FAILURE;
     }
-    
     // init dest
     memset(&dest, 0, sizeof(dest));
     dest.sin_family = AF_INET;
     dest.sin_addr.s_addr = dest_ip;
-    
     start_ping_message(&dest.sin_addr.s_addr, count);
-
     // Thread sender args
     SenderArgs sender_args = {
         .dest = &dest,
@@ -72,27 +68,21 @@ int main(int argc, char *argv[]){
         .sock = sockStatus,
         .count = count
     };
-
     // Thread receiver args
     ReceiverArgs receiver_args = {
         .ring_buffer = &ring_buffer,
         .sock = sockStatus,
         .count = count
     };
-
     pthread_t senderT, receiverT;
-
     // Create the threads
     pthread_create(&senderT, NULL, sender_thread, &sender_args);
     pthread_create(&receiverT, NULL, receiver_thread, &receiver_args);
-
     // Wait for them to finish
     pthread_join(senderT, NULL);
     pthread_join(receiverT, NULL);
-
     // We are done
     cleanup();
-
     return EXIT_SUCCESS;
 }
 
@@ -251,15 +241,17 @@ void process_reply(char *recvbuf, int bytes, struct sockaddr_in *from, struct ti
 void cleanup() {
     printf("\n=============================================================\n");
     printf("--- %s ping statistics ---\n", inet_ntoa(dest.sin_addr));
-    
-    float loss = 0.0;
-    if (numPacketsSent > 0)
-        loss = 100.0 * (numPacketsSent - numPacketsRecieved) / numPacketsSent;
-    
-    printf("%d packets transmitted, %d received, %.1f%% packet loss\nrtt min/avg/max/mdev = %.2f/%.2f/%.2f/%.2f \n",
+    // Calc Total Time:
+    gettimeofday(&endGlobalClock, NULL);
+    double time = 0.0;
+    if (numPacketsSent > 0){
+        time = (endGlobalClock.tv_sec - startGlobalClock.tv_sec) + 
+               (endGlobalClock.tv_usec - startGlobalClock.tv_usec) / 1000000.0;
+    }
+    printf("%d packets transmitted, %d received, time %.1f sec\nrtt min/avg/max/mdev = %.2f/%.2f/%.2f/%.2f \n",
             numPacketsSent, 
             numPacketsRecieved, 
-            loss,
+            time,
             min_rtt,
             sum_rtt/numPacketsRecieved,
             max_rtt,
@@ -350,7 +342,11 @@ void *receiver_thread(void *arg) {
 
         if (bytes < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) { // Same error nowdays, but in legacy Linux had diffrent value
+                printf("=============================================================\n");
                 printf("Request timeout for icmp_seq=%d\n", numPacketsSent - 1); 
+                printf("Timeout! No reply within 10 seconds. Terminating.\n");
+                printf("=============================================================\n");
+                cleanup();
             } else {
                 perror("recvfrom error");
             }

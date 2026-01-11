@@ -26,7 +26,7 @@ u_int32_t seqNum;
 
 // -- ICMP_SOCK --
 int ICMP_SOCK;
-int dummy_sock = -1;
+int udp_receiver_sock = -1;
 
 int main(int argc, char *argv[]){
     int res = 0;
@@ -35,30 +35,24 @@ int main(int argc, char *argv[]){
         cleanup(NULL);
         return EXIT_FAILURE;
     };
-
     res = parseArguments(argc, argv);
     if (res == -1){
         cleanup(NULL);
         return EXIT_FAILURE;
     };
-
     int sock = initSocket();
     if (sock == -1){
         cleanup(NULL);
         return EXIT_FAILURE;
     }
-
     // init tmp storage
     LinkedList *open_ports = NULL;
     int bytes = 0;
     socklen_t addr_len = sizeof(*dest);
-
     unsigned char tcp_packet_response[sizeof(struct iphdr) + sizeof(struct tcphdr)];
     memset(tcp_packet_response,0,sizeof(tcp_packet_response));
-    
     unsigned char udp_packet_response[1024]; // <-- reply may be big
     memset(udp_packet_response,0,1024);
-
     unsigned char icmp_packet_response[64]; // <-- 64 bytes (Enough to hold Outer IP + ICMP + Inner IP + Inner UDP)
     memset(icmp_packet_response,0,sizeof(icmp_packet_response));
 
@@ -79,10 +73,11 @@ int main(int argc, char *argv[]){
                         break; 
                     }
 
-                    struct tcphdr *tcp_resp = (struct tcphdr *)(tcp_packet_response + sizeof(struct iphdr));
+                    struct iphdr *ip_resp = (struct iphdr *)tcp_packet_response;
+                    int ip_header_len = ip_resp->ihl * 4; // IHL is in 32-bit words
+                    struct tcphdr *tcp_resp = (struct tcphdr *)(tcp_packet_response + ip_header_len);
                     // FILTER: Check if this packet is actually the reply to our scan
                     if (ntohs(tcp_resp->th_dport) == our_port && ntohs(tcp_resp->th_sport) == curr_port) {
-                        
                         printf("Recieved an answer from port num %d \n", curr_port);
                         // check the flags.
                         if ((tcp_resp->th_flags & (TH_SYN | TH_ACK)) == (TH_SYN | TH_ACK)) {
@@ -93,6 +88,9 @@ int main(int argc, char *argv[]){
                             prepare_packet(TH_RST);
                             sendto(sock, tcp_header, sizeof(*tcp_header), 0, (struct sockaddr *)dest, sizeof(*dest));
                             seqNum = rand();
+                        }
+                        else if (tcp_resp->th_flags & TH_RST) {
+                            printf("Port %d is closed (RST flag received)\n", curr_port);
                         }
                         break; 
                     }
@@ -113,8 +111,8 @@ int main(int argc, char *argv[]){
                 FD_SET(sock, &listener);
                 FD_SET(ICMP_SOCK, &listener);
 
-                if (dummy_sock != -1) {
-                    FD_SET(dummy_sock, &listener);
+                if (udp_receiver_sock != -1) {
+                    FD_SET(udp_receiver_sock, &listener);
                 }
                 
                 timeout.tv_sec = TIMEOUT;
@@ -122,7 +120,7 @@ int main(int argc, char *argv[]){
 
                 int max = sock;
                 if (ICMP_SOCK > max) max = ICMP_SOCK;
-                if (dummy_sock > max) max = dummy_sock;
+                if (udp_receiver_sock > max) max = udp_receiver_sock;
 
                 int resp = select(max + 1, &listener, NULL, NULL, &timeout);
 
@@ -132,14 +130,14 @@ int main(int argc, char *argv[]){
                     break;      
                 } 
                 else {
-                    // Check dummy Socket
-                    if (dummy_sock != -1 && FD_ISSET(dummy_sock, &listener)) {
+                    // Check UDP receive Socket
+                    if (udp_receiver_sock != -1 && FD_ISSET(udp_receiver_sock, &listener)) {
                         struct sockaddr_in reply_addr;
                         socklen_t reply_len = sizeof(reply_addr);
                         char junk[1024];
 
                         // 1. Capture the sender's address so we know WHICH port replied
-                        int bytes = recvfrom(dummy_sock, junk, sizeof(junk), 0, (struct sockaddr *)&reply_addr, &reply_len);
+                        int bytes = recvfrom(udp_receiver_sock, junk, sizeof(junk), 0, (struct sockaddr *)&reply_addr, &reply_len);
                         
                         if (bytes >= 0) {
                             // 2. Extract the actual port from the sender
@@ -169,9 +167,7 @@ int main(int argc, char *argv[]){
                         // Validate packet length to avoid crashes on small junk packets
                         if (bytes >= sizeof(struct iphdr) + sizeof(struct udphdr)) {
                             struct udphdr *ptr = (struct udphdr *)&udp_packet_response[sizeof(struct iphdr)];
-                            
                             if (ntohs(ptr->uh_sport) == curr_port) {
-                                // MATCH! Open Port.
                                 add_port(open_ports, curr_port);
                                 curr_port++; // Move to next port
                                 seqNum = rand();
@@ -183,24 +179,19 @@ int main(int argc, char *argv[]){
                     // Check ICMP Socket
                     if (FD_ISSET(ICMP_SOCK, &listener)) {
                         bytes = recvfrom(ICMP_SOCK, icmp_packet_response, sizeof(icmp_packet_response), 0, (struct sockaddr *)dest, &addr_len);
-                        
                         // We need at least 56 bytes (IP + ICMP + Inner IP + Inner UDP)
                         if (bytes >= 56) {
                             struct icmphdr *ptr = (struct icmphdr *)&icmp_packet_response[sizeof(struct iphdr)];
-                            
                             if (ptr->type == ICMP_DEST_UNREACH && ptr->code == ICMP_PORT_UNREACH) {
-                                // 1. Jump over ICMP Header (8 bytes) to get Inner IP
+                                // Jump over ICMP Header (8 bytes) to get Inner IP
                                 struct iphdr *inner_ip = (struct iphdr *)((char *)ptr + 8);
-                                
-                                // 2. Jump over Inner IP Header to get Inner UDP
+                                // Jump over Inner IP Header to get Inner UDP
                                 int inner_ip_len = inner_ip->ihl * 4;
                                 struct udphdr *inner_udp = (struct udphdr *)((char *)inner_ip + inner_ip_len);
-                                
                                 // KEEP ONLY FOR DEBUG. 
                                 // int failed_port = ntohs(inner_udp->uh_dport);
                                 // printf("\n[DEBUG] ICMP Error Received! Failed Port: %d | Current Scan: %d\n", failed_port, curr_port);
-
-                                // 3. ONLY fail if the error is for the CURRENT port
+                                // ONLY fail if the error is for the CURRENT port
                                 if (ntohs(inner_udp->uh_dport) == curr_port) {
                                     printf("Port is closed: %d\n", curr_port);
                                     curr_port++; 
@@ -257,13 +248,11 @@ int parseArguments(int argc, char *argv[]){
 }
 
 int init(){
-    
     dest = (struct sockaddr_in*)calloc(1, sizeof(struct sockaddr_in));
     if (dest == NULL) {
             printf("Dest memory allocation failed.\\n");
             return -1;
     }
-
     src = (struct sockaddr_in*)calloc(1, sizeof(struct sockaddr_in));
     if (src == NULL) {
             printf("Src memory allocation failed.\\n");
@@ -306,24 +295,22 @@ int init(){
     our_port = 5555;
     seqNum = rand();
 
-    // Setup Dummy Socket so the OS reserve Port 5555
+    // Setup UDP receiver Socket so the OS reserve Port 5555
     if (!isTCP) {
-        dummy_sock = socket(AF_INET, SOCK_DGRAM, 0);
-        if (dummy_sock < 0) {
-            perror("Dummy socket creation failed");
+        udp_receiver_sock = socket(AF_INET, SOCK_DGRAM, 0);
+        if (udp_receiver_sock < 0) {
+            perror("UDP reciever socket creation failed");
             return -1;
         }
 
-        struct sockaddr_in dummy_addr;
-        memset(&dummy_addr, 0, sizeof(dummy_addr));
-        dummy_addr.sin_family = AF_INET;
-        dummy_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        dummy_addr.sin_port = htons(our_port); // Bind to 5555
+        struct sockaddr_in udp_receiver_addr;
+        memset(&udp_receiver_addr, 0, sizeof(udp_receiver_addr));
+        udp_receiver_addr.sin_family = AF_INET;
+        udp_receiver_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        udp_receiver_addr.sin_port = htons(our_port); // Bind to 5555
 
-        if (bind(dummy_sock, (struct sockaddr *)&dummy_addr, sizeof(dummy_addr)) < 0) {
-            perror("Dummy socket bind failed");
-            // It might fail if you run the scanner twice quickly. 
-            // You can try changing 'our_port' or just ignore this if testing.
+        if (bind(udp_receiver_sock, (struct sockaddr *)&udp_receiver_addr, sizeof(udp_receiver_addr)) < 0) {
+            perror("UDP receiver socket bind failed");
             return -1;
         }
     }

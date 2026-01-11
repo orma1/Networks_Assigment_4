@@ -3,7 +3,7 @@
 // --- Defines ---
 
 #define MAX_PORTS 100000
-#define TIMEOUT 1
+#define TIMEOUT 0.5
 #define START_RANGE 1
 #define MAX_RANGE 65535
 // 65535
