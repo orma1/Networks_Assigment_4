@@ -26,7 +26,7 @@ u_int32_t seqNum;
 
 // -- ICMP_SOCK --
 int ICMP_SOCK;
-int dummy_sock = -1;
+int udp_receiver_sock = -1;
 
 int main(int argc, char *argv[]){
     int res = 0;
@@ -35,30 +35,24 @@ int main(int argc, char *argv[]){
         cleanup(NULL);
         return EXIT_FAILURE;
     };
-
     res = parseArguments(argc, argv);
     if (res == -1){
         cleanup(NULL);
         return EXIT_FAILURE;
     };
-
     int sock = initSocket();
     if (sock == -1){
         cleanup(NULL);
         return EXIT_FAILURE;
     }
-
     // init tmp storage
     LinkedList *open_ports = NULL;
     int bytes = 0;
     socklen_t addr_len = sizeof(*dest);
-
     unsigned char tcp_packet_response[sizeof(struct iphdr) + sizeof(struct tcphdr)];
     memset(tcp_packet_response,0,sizeof(tcp_packet_response));
-    
     unsigned char udp_packet_response[1024]; // <-- reply may be big
     memset(udp_packet_response,0,1024);
-
     unsigned char icmp_packet_response[64]; // <-- 64 bytes (Enough to hold Outer IP + ICMP + Inner IP + Inner UDP)
     memset(icmp_packet_response,0,sizeof(icmp_packet_response));
 
@@ -117,8 +111,8 @@ int main(int argc, char *argv[]){
                 FD_SET(sock, &listener);
                 FD_SET(ICMP_SOCK, &listener);
 
-                if (dummy_sock != -1) {
-                    FD_SET(dummy_sock, &listener);
+                if (udp_receiver_sock != -1) {
+                    FD_SET(udp_receiver_sock, &listener);
                 }
                 
                 timeout.tv_sec = TIMEOUT;
@@ -126,7 +120,7 @@ int main(int argc, char *argv[]){
 
                 int max = sock;
                 if (ICMP_SOCK > max) max = ICMP_SOCK;
-                if (dummy_sock > max) max = dummy_sock;
+                if (udp_receiver_sock > max) max = udp_receiver_sock;
 
                 int resp = select(max + 1, &listener, NULL, NULL, &timeout);
 
@@ -136,14 +130,14 @@ int main(int argc, char *argv[]){
                     break;      
                 } 
                 else {
-                    // Check dummy Socket
-                    if (dummy_sock != -1 && FD_ISSET(dummy_sock, &listener)) {
+                    // Check UDP receive Socket
+                    if (udp_receiver_sock != -1 && FD_ISSET(udp_receiver_sock, &listener)) {
                         struct sockaddr_in reply_addr;
                         socklen_t reply_len = sizeof(reply_addr);
                         char junk[1024];
 
                         // 1. Capture the sender's address so we know WHICH port replied
-                        int bytes = recvfrom(dummy_sock, junk, sizeof(junk), 0, (struct sockaddr *)&reply_addr, &reply_len);
+                        int bytes = recvfrom(udp_receiver_sock, junk, sizeof(junk), 0, (struct sockaddr *)&reply_addr, &reply_len);
                         
                         if (bytes >= 0) {
                             // 2. Extract the actual port from the sender
@@ -261,13 +255,11 @@ int parseArguments(int argc, char *argv[]){
 }
 
 int init(){
-    
     dest = (struct sockaddr_in*)calloc(1, sizeof(struct sockaddr_in));
     if (dest == NULL) {
             printf("Dest memory allocation failed.\\n");
             return -1;
     }
-
     src = (struct sockaddr_in*)calloc(1, sizeof(struct sockaddr_in));
     if (src == NULL) {
             printf("Src memory allocation failed.\\n");
@@ -310,24 +302,22 @@ int init(){
     our_port = 5555;
     seqNum = rand();
 
-    // Setup Dummy Socket so the OS reserve Port 5555
+    // Setup UDP receiver Socket so the OS reserve Port 5555
     if (!isTCP) {
-        dummy_sock = socket(AF_INET, SOCK_DGRAM, 0);
-        if (dummy_sock < 0) {
-            perror("Dummy socket creation failed");
+        udp_receiver_sock = socket(AF_INET, SOCK_DGRAM, 0);
+        if (udp_receiver_sock < 0) {
+            perror("UDP reciever socket creation failed");
             return -1;
         }
 
-        struct sockaddr_in dummy_addr;
-        memset(&dummy_addr, 0, sizeof(dummy_addr));
-        dummy_addr.sin_family = AF_INET;
-        dummy_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        dummy_addr.sin_port = htons(our_port); // Bind to 5555
+        struct sockaddr_in udp_receiver_addr;
+        memset(&udp_receiver_addr, 0, sizeof(udp_receiver_addr));
+        udp_receiver_addr.sin_family = AF_INET;
+        udp_receiver_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        udp_receiver_addr.sin_port = htons(our_port); // Bind to 5555
 
-        if (bind(dummy_sock, (struct sockaddr *)&dummy_addr, sizeof(dummy_addr)) < 0) {
-            perror("Dummy socket bind failed");
-            // It might fail if you run the scanner twice quickly. 
-            // You can try changing 'our_port' or just ignore this if testing.
+        if (bind(udp_receiver_sock, (struct sockaddr *)&udp_receiver_addr, sizeof(udp_receiver_addr)) < 0) {
+            perror("UDP receiver socket bind failed");
             return -1;
         }
     }
