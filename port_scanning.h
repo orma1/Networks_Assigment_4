@@ -31,6 +31,6 @@ unsigned int calculate_sum(void *data, unsigned int bytes);
 void prepare_packet(uint8_t flag);
 LinkedList *add_port(LinkedList *ls, uint16_t port);
 void print_scan_results(LinkedList * head);
-void cleanup(LinkedList *ls);
+void cleanup();
 void release_node(LinkedList *ls);
 uint32_t get_local_ip();

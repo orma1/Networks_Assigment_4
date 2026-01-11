@@ -55,8 +55,7 @@ int main(int argc, char *argv[]){
     memset(udp_packet_response,0,1024);
     unsigned char icmp_packet_response[64]; // <-- 64 bytes (Enough to hold Outer IP + ICMP + Inner IP + Inner UDP)
     memset(icmp_packet_response,0,sizeof(icmp_packet_response));
-
-    // Sending Loop
+    // Sending Loop --- TCP ---
     while (curr_port < START_RANGE + MAX_PORTS && curr_port < MAX_RANGE){
         if (isTCP){
             // prepare the packet
@@ -72,7 +71,6 @@ int main(int argc, char *argv[]){
                         // timeout was reached with no matching packet
                         break; 
                     }
-
                     struct iphdr *ip_resp = (struct iphdr *)tcp_packet_response;
                     int ip_header_len = ip_resp->ihl * 4; // IHL is in 32-bit words
                     struct tcphdr *tcp_resp = (struct tcphdr *)(tcp_packet_response + ip_header_len);
@@ -97,7 +95,7 @@ int main(int argc, char *argv[]){
                 }
             // check next port
             curr_port++;
-        }else{
+        }else{ // --- Sending loop UDP ---
             // prepare the packet
             prepare_packet(0);
             // send packet
@@ -106,15 +104,12 @@ int main(int argc, char *argv[]){
             while(1) {
                 fd_set listener;
                 struct timeval timeout;
-                
                 FD_ZERO(&listener);
                 FD_SET(sock, &listener);
                 FD_SET(ICMP_SOCK, &listener);
-
                 if (udp_receiver_sock != -1) {
                     FD_SET(udp_receiver_sock, &listener);
                 }
-                
                 timeout.tv_sec = TIMEOUT;
                 timeout.tv_usec = 0;
 
@@ -135,18 +130,14 @@ int main(int argc, char *argv[]){
                         struct sockaddr_in reply_addr;
                         socklen_t reply_len = sizeof(reply_addr);
                         char junk[1024];
-
-                        // 1. Capture the sender's address so we know WHICH port replied
+                        //  Capture the sender's address so we know WHICH port replied
                         int bytes = recvfrom(udp_receiver_sock, junk, sizeof(junk), 0, (struct sockaddr *)&reply_addr, &reply_len);
-                        
                         if (bytes >= 0) {
-                            // 2. Extract the actual port from the sender
+                            // Extract the actual port from the sender
                             int actual_port = ntohs(reply_addr.sin_port);
-                            
-                            // 3. Add to open ports list (even if it's a late packet)
+                            //  Add to open ports list (even if it's a late packet)
                             open_ports = add_port(open_ports, actual_port);
 
-                            // 4. Logic: Did we get the answer for the CURRENT port?
                             if (actual_port == curr_port) {
                                 printf("Found an open port: %d (via reply)\n", curr_port);
                                 curr_port++;
@@ -155,8 +146,6 @@ int main(int argc, char *argv[]){
                             } 
                             else {
                                 // This was a "Late Packet" from a previous timeout.
-                                // We recorded it above, but we DO NOT break.
-                                // We keep waiting for the CURRENT curr_port to reply or timeout.
                                 printf("Debug: Received late reply for port %d while scanning %d\n", actual_port, curr_port);
                             }
                         }
@@ -295,26 +284,6 @@ int init(){
     our_port = 5555;
     seqNum = rand();
 
-    // Setup UDP receiver Socket so the OS reserve Port 5555
-    if (!isTCP) {
-        udp_receiver_sock = socket(AF_INET, SOCK_DGRAM, 0);
-        if (udp_receiver_sock < 0) {
-            perror("UDP reciever socket creation failed");
-            return -1;
-        }
-
-        struct sockaddr_in udp_receiver_addr;
-        memset(&udp_receiver_addr, 0, sizeof(udp_receiver_addr));
-        udp_receiver_addr.sin_family = AF_INET;
-        udp_receiver_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        udp_receiver_addr.sin_port = htons(our_port); // Bind to 5555
-
-        if (bind(udp_receiver_sock, (struct sockaddr *)&udp_receiver_addr, sizeof(udp_receiver_addr)) < 0) {
-            perror("UDP receiver socket bind failed");
-            return -1;
-        }
-    }
-
     return 0;
 }
 
@@ -352,7 +321,6 @@ unsigned short int checksum(Psuedo_Header *ps, void *protocl_h){
 }
 
 void prepare_packet(uint8_t flag){
-
     psuedo_header->src = src->sin_addr.s_addr;
     psuedo_header->dest = dest->sin_addr.s_addr;
     if (isTCP) {
@@ -362,8 +330,6 @@ void prepare_packet(uint8_t flag){
         psuedo_header->protocol = 17;
         psuedo_header->segment_length = htons(8);
     }
-
-
     if (isTCP){
         // set ports
         tcp_header->th_sport = htons(our_port);
@@ -396,7 +362,6 @@ int initSocket(){
     //creeate IPV4 Raw socket, TCP protocol
     int s;
     struct timeval tv_out;
-
     if (isTCP){
         s = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
     } else{
@@ -405,6 +370,21 @@ int initSocket(){
         if (ICMP_SOCK < 0){
             perror("socket");
             fprintf(stderr, "You need to be root to create raw sockets!\n");
+            return -1;
+        }
+        // Setup UDP receiver Socket so the OS reserve Port 5555
+        udp_receiver_sock = socket(AF_INET, SOCK_DGRAM, 0);
+        if (udp_receiver_sock < 0) {
+            perror("UDP reciever socket creation failed");
+            return -1;
+        }
+        struct sockaddr_in udp_receiver_addr;
+        memset(&udp_receiver_addr, 0, sizeof(udp_receiver_addr));
+        udp_receiver_addr.sin_family = AF_INET;
+        udp_receiver_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        udp_receiver_addr.sin_port = htons(our_port); // Bind to 5555
+        if (bind(udp_receiver_sock, (struct sockaddr *)&udp_receiver_addr, sizeof(udp_receiver_addr)) < 0) {
+            perror("UDP receiver socket bind failed");
             return -1;
         }
     }
@@ -426,7 +406,6 @@ int initSocket(){
         close(s);
         return -1;
     }
-
     if (!isTCP){
         int success = setsockopt(ICMP_SOCK, SOL_SOCKET, SO_RCVTIMEO, &tv_out, sizeof(tv_out));
         if (success < 0) {
@@ -491,13 +470,6 @@ void cleanup(LinkedList *ls){
     free(udp_header);
 }
 
-void release_node(LinkedList *ls){
-    if (ls != NULL)
-    {
-        release_node(ls->next);
-    }
-    free(ls);
-}
 
 uint32_t get_local_ip() {
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -506,7 +478,7 @@ uint32_t get_local_ip() {
     struct sockaddr_in serv;
     memset(&serv, 0, sizeof(serv));
     serv.sin_family = AF_INET;
-    serv.sin_addr.s_addr = inet_addr("8.8.8.8"); // Doesn't need to be reachable
+    serv.sin_addr.s_addr = inet_addr("8.8.8.8"); // Doesn't has to be reachable
     serv.sin_port = htons(53);
 
     // This doesn't send a packet, it just maps the route
